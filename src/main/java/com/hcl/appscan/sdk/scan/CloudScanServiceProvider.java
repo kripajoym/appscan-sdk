@@ -62,7 +62,8 @@ public class CloudScanServiceProvider implements IScanServiceProvider, Serializa
 			JSONObject json = (JSONObject) response.getResponseBodyAsJSON();
 			
 			if (status == HttpsURLConnection.HTTP_CREATED) {
-				m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(CREATE_SCAN_SUCCESS)));
+                                String link = m_authProvider.getServer()+"main/myapps/"+params.get(APP_ID)+"/scans";
+				m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(CREATE_SCAN_SUCCESS,link)));
 				return json.getString(ID);
 			}
 			else if (json != null && json.has(MESSAGE))
