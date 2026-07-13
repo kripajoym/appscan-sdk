@@ -1,12 +1,13 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017. 
+ * © Copyright HCL Technologies Ltd. 2017, 2026.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
 package com.hcl.appscan.sdk.utils;
 
 import com.hcl.appscan.sdk.CoreConstants;
+import com.hcl.appscan.sdk.scanners.sast.xml.IModelXMLConstants;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -76,8 +77,27 @@ public class SystemUtil {
 			os = "mac"; //$NON-NLS-1$
 		else
 			os = "linux"; //$NON-NLS-1$
-
 		return os;
+	}
+
+	/**
+	 * Updated getOS method for ClientType values.
+	 *
+	 * @return A string representing the OS name. One of "windows", "mac", "linux" or Others.
+	 */
+	public static String getOSUpdated() {
+		String os = System.getProperty("os.name"); //$NON-NLS-1$
+		os = os.toLowerCase();
+
+		if (os.contains("win")) { //$NON-NLS-1$
+			return "windows"; //$NON-NLS-1$
+		} else if (os.contains("mac")) { //$NON-NLS-1$
+			return "mac"; //$NON-NLS-1$
+		} else if (os.contains("linux")) { //$NON-NLS-1$
+			return "linux"; //$NON-NLS-1$
+		} else {
+			return os;
+		}
 	}
 	
 	/**
@@ -136,5 +156,14 @@ public class SystemUtil {
 	 */
 	public static boolean isSourceCodeOnly() {
 		return System.getProperty(CoreConstants.SOURCE_CODE_ONLY) != null;
+	}
+	
+	/**
+	 * Get the IRX cache location from IRX_MINOR_CACHE_HOME flag
+	 *
+	 * @return A string representation of the user-specified irx cache location
+	 */
+	public static String getIrxMinorCacheHome() {
+		return System.getProperty(IModelXMLConstants.A_IRX_MINOR_CACHE_HOME.toUpperCase());
 	}
 }

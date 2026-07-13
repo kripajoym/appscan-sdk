@@ -1,5 +1,5 @@
 /**
- * © Copyright HCL Technologies Ltd. 2019, 2020.
+ * © Copyright HCL Technologies Ltd. 2019, 2025.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -48,6 +48,7 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
 	private int m_highFindings;
 	private int m_mediumFindings;
 	private int m_lowFindings;
+        private int m_criticalFindings;
 	private int m_infoFindings;
     public ASEResultsProvider(String scanId, String type, IScanServiceProvider provider, IProgress progress, String scanName) {
         m_type = type;
@@ -84,7 +85,13 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
 		return m_totalFindings;
 	}
 
-	@Override
+        @Override
+        public int getCriticalCount() {
+                checkResults();
+                return m_criticalFindings;
+        }
+    
+        @Override
 	public int getHighCount() {
 		checkResults();
 		return m_highFindings;
@@ -154,39 +161,43 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
 		try {
 			m_status = getScanStatus(m_scanId);
 //			m_status = getStatisticsStatus(m_scanId);
-            if (m_status != null && m_status.equalsIgnoreCase("Ready")) {
-                m_message = "";
-                m_status=getReportPackStatus(m_scanId);
-            }
-			if(m_status != null && m_status.equalsIgnoreCase("Ready")) {
-                JSONObject obj = m_scanProvider.getScanDetails(m_scanId);
-                if (obj == null) {
-                    m_message = Messages.getMessage(RESULTS_UNAVAILABLE);
-                    throw new NullPointerException(Messages.getMessage(RESULTS_UNAVAILABLE));
-                }
-
+			if(m_status == null) {// In case of internet disconnect Status is set to null.
+				m_status = FAILED;
+			} else if (m_status.equalsIgnoreCase("Ready")) {
+				m_message = "";
+				m_status = getReportPackStatus(m_scanId);
+			}
+			
+			//to check whether the report is generated or not
+			if(m_status!=null && m_status.equals("Ready")) {
+				JSONObject obj = m_scanProvider.getScanDetails(m_scanId);
+				if (obj == null) {
+				    m_message = Messages.getMessage(RESULTS_UNAVAILABLE);
+				    throw new NullPointerException(Messages.getMessage(RESULTS_UNAVAILABLE));
+				}
 				m_totalFindings = obj.getInt(TOTAL_ISSUES);
+				m_criticalFindings = obj.getInt(CRITICAL_ISSUES);
 				m_highFindings = obj.getInt(HIGH_ISSUES);
 				m_mediumFindings = obj.getInt(MEDIUM_ISSUES);
 				m_lowFindings = obj.getInt(LOW_ISSUES);
 				m_infoFindings = obj.getInt(INFO_ISSUES);
 				m_hasResults = true;
 				m_message = "";
-			}
-			if (RUNNING.equalsIgnoreCase(m_status)) {
+			} else if (RUNNING.equalsIgnoreCase(m_status)) {
 				m_message = "";
-			} else if (m_status != null && m_status.startsWith(SUSPENDED)) {    // In case of Scan Failure ASE returns Suspended (With Reason) in Status
+			} else if (CANCELING.equalsIgnoreCase(m_status)) {
+				m_status = FAILED;
+			} else if (m_status.startsWith(SUSPENDED)) {  // In case of Scan Failure ASE returns Suspended (With Reason) in Status
 				this.m_message = m_status;
-
 				String description = "";
 				boolean isSuspendedByUser = false;
 				if (m_status.contains("(") && m_status.contains(")")) {
 					description = m_status.substring(m_status.indexOf("(") + 1, m_status.indexOf(")"));
 					// If User Suspends(Pause) Job in ASE then it returns Suspended(By User) status message, Scan status is not set to FAILED
 					if ("by user".equals(description.toLowerCase())) {
-						m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Name: "  + m_scanName)));
-						m_message = Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Name: "  + m_scanName);
-						isSuspendedByUser = true;
+					    m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Name: "  + m_scanName)));
+					    m_message = Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Name: "  + m_scanName);
+					    isSuspendedByUser = true;
 					}
 				}
 				// If Scan is not Paused by User and we get Suspended state from ASE, Job status is set to FAILED to determine Scan has FAILED in Jenkins
@@ -197,7 +208,7 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
 				}
 			}
 		} catch (IOException | JSONException | NullPointerException e) {
-			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_DETAILS, e.getMessage())), e);
+			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_DETAILS, e.getMessage())));
 			m_status = FAILED;
 		}
 	}
@@ -264,8 +275,8 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
    
     private String getReportPackId(String scanId) {
         return String.valueOf(Integer.parseInt(scanId)+1);
-        // please uncomment the below code when you figure out how to parse the reponse.
-        // currently the reponse is returned as array which makes no sense.
+        // please uncomment the below code when you figure out how to parse the response.
+        // currently the response is returned as array which makes no sense.
         /*IAuthenticationProvider authProvider = m_scanProvider.getAuthenticationProvider();
 		if(authProvider.isTokenExpired()) {
 			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_LOGIN_EXPIRED)));
@@ -391,5 +402,10 @@ public class ASEResultsProvider implements IResultsProvider, Serializable, CoreC
 			Logger.getLogger(ASEResultsProvider.class.getName()).log(Level.SEVERE, null, ex);
 		}
 		return null;
+	}
+
+	@Override
+	public void getScanLogFile(File file) {
+		// Not applicable for ASE Results Provider
 	}
 }

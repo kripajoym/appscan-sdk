@@ -1,5 +1,5 @@
 /**
- * © Copyright HCL Technologies Ltd. 2018,2020,2021.
+ * © Copyright HCL Technologies Ltd. 2018, 2025.
  */
 package com.hcl.appscan.sdk.results;
 
@@ -33,65 +33,97 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 		super(scanId, type, provider, progress);
 	}
 
+	public NonCompliantIssuesResultProvider(String scanId, String executionId, String type,  IScanServiceProvider provider, IProgress progress) {
+		super(scanId, executionId, type, provider, progress);
+	}
+
 	@Override
 	protected void loadResults() {
-		try {
-			JSONObject obj = m_scanProvider.getScanDetails(m_scanId);
-			if (obj == null) {
-				m_status = FAILED;
-				return;
-			} else if (obj.has(KEY) && obj.get(KEY).equals(UNAUTHORIZED_ACTION)) {
-				m_status = FAILED;
-				return;
-			} else if (obj.has(STATUS) && obj.get(STATUS).equals(UNKNOWN)) {
-                m_status = UNKNOWN;
-                return;
-			}
+        try {
+            if (m_scanId == null) {
+                m_status = FAILED;
+            } else {
+                JSONObject items = m_scanProvider.getScanDetails(m_scanId);
+                JSONObject obj = items == null ? null : items.getJSONObject(LATEST_EXECUTION);
+                if (obj == null) {
+                    m_status = FAILED;
+                    return;
+                } else if (items.has(KEY) && items.get(KEY).equals(UNAUTHORIZED_ACTION)) {
+                    m_status = FAILED;
+                    return;
+                } else if (obj.has(STATUS) && obj.get(STATUS).equals(UNKNOWN)) {
+                    m_status = UNKNOWN;
+                    return;
+                }
 
-			obj = (JSONObject) obj.get(LATEST_EXECUTION);
+                if (m_executionId != null && !m_executionId.isEmpty()) {
+                    String executionId = obj.getString(ID);
+                    if (executionId.equals(m_executionId)) {
+                        m_status = obj.getString(STATUS);
+                    } else {
+                        m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(ERROR_CANCEL_RESCAN, m_executionId)));
+                        m_status = FAILED;
+                    }
+                } else {
+                    m_status = obj.getString(STATUS);
+                    m_executionId = obj.getString(ID);
+                }
 
-			m_status = obj.getString(STATUS);
-			if (FAILED.equalsIgnoreCase(m_status) && obj.has(USER_MESSAGE)) {
-				m_progress.setStatus(new Message(Message.ERROR, obj.getString(USER_MESSAGE)));
-				m_message = obj.getString(USER_MESSAGE);
-			} else if (PAUSED.equalsIgnoreCase(m_status)) {
-				m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Id: " + m_scanId)));
-				m_message = Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Id: " + m_scanId);
-			} else if (m_status != null && !(m_status.equalsIgnoreCase(INQUEUE) || m_status.equalsIgnoreCase(RUNNING) || m_status.equalsIgnoreCase(PAUSING))) {
-				JSONArray array = m_scanProvider.getNonCompliantIssues(m_scanId);
-				m_totalFindings = 0;
-				
-				for (int i = 0; i < array.length(); i++) {
-					JSONObject jobj = array.getJSONObject(i);
-					String sev = jobj.getString("Severity");
-					int count = jobj.getInt("Count");
-					
-					switch (sev.toLowerCase()) {
-					case "high":
-						m_highFindings = count;
-						m_totalFindings += count;
-						break;
-					case "medium":
-						m_mediumFindings = count;
-						m_totalFindings += count;
-						break;
-					case "low":
-						m_lowFindings = count;
-						m_totalFindings += count;
-						break;
-					case "informational":
-						m_infoFindings = count;
-						m_totalFindings += count;
-						break;
-					default:
-						m_totalFindings += count;
-						break;
-					}
-				}
-				setHasResult(true);
-				m_message = "";
-			} else if (RUNNING.equalsIgnoreCase(m_status)) m_message = "";
-		} catch (IOException | JSONException | NullPointerException e) {
+                if (FAILED.equalsIgnoreCase(m_status) && obj.has(USER_MESSAGE)) {
+                    m_progress.setStatus(new Message(Message.ERROR, obj.getString(USER_MESSAGE)));
+                    m_message = obj.getString(USER_MESSAGE);
+                } else if (PAUSED.equalsIgnoreCase(m_status)) {
+                    m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Id: " + m_scanId)));
+                    m_message = Messages.getMessage(SUSPEND_JOB_BYUSER, "Scan Id: " + m_scanId);
+                } else if (m_status != null && !(m_status.equalsIgnoreCase(INQUEUE) || m_status.equalsIgnoreCase(RUNNING) || m_status.equalsIgnoreCase(PAUSING))) {
+                    JSONArray array;
+                    if(m_executionId != null && !m_executionId.isEmpty()) {
+                        array = m_scanProvider.getNonCompliantIssuesUsingExecutionId(m_executionId);
+                    } else {
+                        array = m_scanProvider.getNonCompliantIssues(m_scanId);
+                    }
+                    m_totalFindings = 0;
+
+                    if(array == null) {
+                        m_status = FAILED;
+                    } else {
+                        for (int i = 0; i < array.length(); i++) {
+                            JSONObject jobj = array.getJSONObject(i);
+                            String sev = jobj.getString("Severity");
+                            int count = jobj.getInt("N");
+
+                            switch (sev.toLowerCase()) {
+                                case "critical":
+                                    m_criticalFindings += count;
+                                    m_totalFindings += count;
+                                    break;
+                                case "high":
+                                    m_highFindings += count;
+                                    m_totalFindings += count;
+                                    break;
+                                case "medium":
+                                    m_mediumFindings += count;
+                                    m_totalFindings += count;
+                                    break;
+                                case "low":
+                                    m_lowFindings += count;
+                                    m_totalFindings += count;
+                                    break;
+                                case "informational":
+                                    m_infoFindings += count;
+                                    m_totalFindings += count;
+                                    break;
+                                default:
+                                    m_totalFindings += count;
+                                    break;
+                            }
+                        }
+                    }
+                    setHasResult(true);
+                    m_message = "";
+                } else if (RUNNING.equalsIgnoreCase(m_status)) m_message = "";
+            }
+        } catch (IOException | JSONException | NullPointerException e) {
 			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_DETAILS, e.getMessage())),
 					e);
 			m_status = FAILED;
@@ -143,7 +175,7 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 		Map<String, String> request_headers = authProvider.getAuthorizationHeader(true);
 		request_headers.put(CONTENT_LENGTH, "0"); //$NON-NLS-1$
 
-		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy());
+		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy(),m_scanProvider.getAuthenticationProvider().getacceptInvalidCerts());
 		HttpResponse response = client.get(request_url, request_headers, null);
 		int responseCode = response.getResponseCode();
 		if (responseCode == HttpsURLConnection.HTTP_OK)
@@ -171,12 +203,17 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 			return null;
 		}
 
-		String request_url = authProvider.getServer() + String.format(API_REPORT_SELECTED_ISSUES, SCOPE, scanId);
+		String request_url;
+		if(m_executionId != null && !m_executionId.isEmpty()) {
+			request_url = authProvider.getServer() + String.format(API_REPORT_SELECTED_ISSUES, "ScanExecution", m_executionId);
+		} else {
+			request_url = authProvider.getServer() + String.format(API_REPORT_SELECTED_ISSUES, SCOPE, scanId);
+		}
 		Map<String, String> request_headers = authProvider.getAuthorizationHeader(true);
 		request_headers.put("Content-Type", "application/json; charset=UTF-8");
 		request_headers.put("Accept", "application/json");
 
-		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy());
+		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy(),m_scanProvider.getAuthenticationProvider().getacceptInvalidCerts());
 		HttpResponse response = client.post(request_url, request_headers, getBodyParams(format).toString());
 		if (response.getResponseCode() != HttpsURLConnection.HTTP_OK) {
 			return null;
@@ -191,6 +228,7 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 		JSONObject body = new JSONObject();
 		body.put("Configuration", getConfiguration(format));
 		body.put("ApplyPolicies", "All");
+		body.put("OdataFilter", "Status eq 'Open' or Status eq 'InProgress' or Status eq 'Reopened' or Status eq 'New'");
 		return body;
 	}
 
@@ -201,8 +239,10 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 		configParams.put("Discussion", false);
 		configParams.put("Overview", true);
 		configParams.put("TableOfContent", true);
-		configParams.put("Advisories", true);
+		configParams.put("Advisories", false);
 		configParams.put("FixRecommendation", true);
+		configParams.put("Articles", true);
+		configParams.put("Coverage", true);
 		configParams.put("History", true);
 		configParams.put("IsTrialReport", false);
 		configParams.put("ReportFileType", format);
@@ -213,15 +253,17 @@ public class NonCompliantIssuesResultProvider extends CloudResultsProvider {
 	}
 
 	private String getScanName() {
-		JSONObject obj;
 		try {
-			obj = m_scanProvider.getScanDetails(m_scanId);
-			return obj.getString("Name");
+			JSONObject items = m_scanProvider.getScanDetails(m_scanId);
+			return items.getString(NAME);
 		} catch (IOException | JSONException e) {
-			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_DETAILS, e.getMessage())),
-					e);
+			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_DETAILS, e.getMessage())), e);
 			return "";
 		}
 
+	}
+
+	public void getScanLogs(File file) {
+		getScanLogFile(file);
 	}
 }

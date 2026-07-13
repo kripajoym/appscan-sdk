@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017, 2022. 
+ * © Copyright HCL Technologies Ltd. 2017, 2024. 
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -26,6 +26,8 @@ import com.hcl.appscan.sdk.scan.ITarget;
 import com.hcl.appscan.sdk.scanners.sast.targets.ISASTTarget;
 import com.hcl.appscan.sdk.scanners.sast.xml.ModelWriter;
 import com.hcl.appscan.sdk.scanners.sast.xml.XmlWriter;
+import com.hcl.appscan.sdk.scanners.sca.SCAScan;
+import com.hcl.appscan.sdk.utils.ServiceUtil;
 import com.hcl.appscan.sdk.utils.SystemUtil;
 
 public class SASTScanManager implements IScanManager{
@@ -37,6 +39,9 @@ public class SASTScanManager implements IScanManager{
 	private boolean m_isOpenSourceOnlyEnabled = false;
 	private boolean m_isSourceCodeOnlyEnabled = false;
 	private boolean m_isStaticAnalysisOnlyEnabled = false;
+	private boolean m_isSecretsScanningDisabled = false;
+	private boolean m_isSecretsScanningEnabled  = false;
+	private boolean m_isSecretsScanningOnlyEnabled = false;
 
 	public SASTScanManager(String workingDir) {
 		m_workingDirectory = workingDir;
@@ -92,7 +97,7 @@ public class SASTScanManager implements IScanManager{
 	
 	private void run(IProgress progress,Map<String, String> properties, IScanServiceProvider provider) throws AppScanException {
 		try {
-			m_scan = new SASTScan(properties, progress, provider);
+			createScan(properties, progress, provider);
 			m_scan.run();
 		} catch (InvalidTargetException | ScannerException e) {
 			throw new AppScanException(e.getLocalizedMessage());
@@ -105,6 +110,32 @@ public class SASTScanManager implements IScanManager{
 	 */
 	public void setIsThirdPartyScanningEnabled(boolean isThirdPartyScanningEnabled) {
 		m_isThirdPartyScanningEnabled = isThirdPartyScanningEnabled;
+	}
+
+	/**
+	 * Disables scanning for secrets.
+	 * @param isSecretsScanningDisabled - True to skip scanning for secrets vulnerabilities.
+	 */
+	public void setIsSecretsScanningDisabled(boolean isSecretsScanningDisabled) {
+        m_isSecretsScanningDisabled = isSecretsScanningDisabled;
+        m_isSecretsScanningEnabled = !isSecretsScanningDisabled;
+    }
+
+	/**
+	 * Enables scanning for secrets.
+	 * @param isSecretsScanningEnabled - True to scan for secrets vulnerabilities.
+	 */
+	public void setIsSecretsScanningEnabled(boolean isSecretsScanningEnabled) {
+		m_isSecretsScanningDisabled = !isSecretsScanningEnabled;
+        m_isSecretsScanningEnabled = isSecretsScanningEnabled;
+	}
+
+	/**
+	 * Only scan for secrets.
+	 * @param isSecretsScanningOnlyEnabled - True to only scan for secrets vulnerabilities.
+	 */
+	public void setIsSecretsScanningOnlyEnabled(boolean isSecretsScanningOnlyEnabled) {
+		m_isSecretsScanningOnlyEnabled = isSecretsScanningOnlyEnabled;
 	}
 
 	/**
@@ -141,7 +172,7 @@ public class SASTScanManager implements IScanManager{
 		try {
 			ModelWriter writer = new XmlWriter(useRelativeTargetPaths);
 			writer.initWriters(new File(m_workingDirectory));		
-			writer.visit(m_targets, m_isThirdPartyScanningEnabled, m_isOpenSourceOnlyEnabled, m_isSourceCodeOnlyEnabled, m_isStaticAnalysisOnlyEnabled);
+			writer.visit(m_targets, m_isThirdPartyScanningEnabled, m_isOpenSourceOnlyEnabled, m_isSourceCodeOnlyEnabled, m_isStaticAnalysisOnlyEnabled, m_isSecretsScanningDisabled, m_isSecretsScanningEnabled, m_isSecretsScanningOnlyEnabled);
 			writer.write();
 		} catch (IOException | TransformerException  e) {
 			throw new AppScanException(e.getLocalizedMessage(), e);
@@ -150,5 +181,17 @@ public class SASTScanManager implements IScanManager{
 	
 	private String getDefaultScanName() {
 		return new File(m_workingDirectory).getName() + SystemUtil.getTimeStamp();
+	}
+	
+	private void createScan(Map<String, String> properties, IProgress progress, IScanServiceProvider provider) {
+		if(m_isOpenSourceOnlyEnabled ) {
+			m_scan = new SCAScan(properties, progress, provider);
+		}
+		else if(m_isStaticAnalysisOnlyEnabled || (provider != null && !ServiceUtil.hasScaEntitlement(provider.getAuthenticationProvider()))) {
+			m_scan = new SASTScan(properties, progress, provider);
+		}
+		else {
+			m_scan = new SAST_SCA_Scan(properties, progress, provider);
+		}
 	}
 }

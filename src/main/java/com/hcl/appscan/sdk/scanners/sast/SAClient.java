@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017, 2022. 
+ * © Copyright HCL Technologies Ltd. 2017, 2024.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -24,6 +24,7 @@ import com.hcl.appscan.sdk.logging.DefaultProgress;
 import com.hcl.appscan.sdk.logging.IProgress;
 import com.hcl.appscan.sdk.logging.Message;
 import com.hcl.appscan.sdk.utils.ArchiveUtil;
+import com.hcl.appscan.sdk.utils.FileUtil;
 import com.hcl.appscan.sdk.utils.ServiceUtil;
 import com.hcl.appscan.sdk.utils.SystemUtil;
 
@@ -31,6 +32,7 @@ public class SAClient implements SASTConstants {
 
 	private static final File DEFAULT_INSTALL_DIR = new File(System.getProperty("user.home"), ".appscan"); //$NON-NLS-1$ //$NON-NLS-2$
 	private static final String SACLIENT = "SAClientUtil"; //$NON-NLS-1$
+	private static final String SACLIENT_SUBDIR_MAC = "Contents" + File.separator + "Home" + File.separator; //$NON-NLS-1$ //$NON-NLS-2$
 	private static final String VERSION_INFO = "version.info"; //$NON-NLS-1$
 	
 	private IProgress m_progress;
@@ -70,7 +72,7 @@ public class SAClient implements SASTConstants {
 						 getClientArgs(properties),
 						 properties.get(APPSCAN_IRGEN_CLIENT),
 						 properties.get(APPSCAN_CLIENT_VERSION),
-						 properties.get(IRGEN_CLIENT_PLUGIN_VERSION));
+						 properties.get(IRGEN_CLIENT_PLUGIN_VERSION), properties.get(CoreConstants.SERVER_URL), properties.get(CoreConstants.ACCEPT_INVALID_CERTS));
 	}
 
 	/**
@@ -86,10 +88,14 @@ public class SAClient implements SASTConstants {
 	public int run(String workingDir, List<String> args) throws IOException, ScannerException {
 		return runClient(workingDir, args, "", "", "");
 	}
+
+    	private int runClient(String workingDir, List<String> args, String irGenClient, String clientVersion, String irgenClientPluginVersion) throws IOException, ScannerException{
+		 return runClient(workingDir,args,irGenClient,clientVersion,irgenClientPluginVersion, "", "");
+        }
 		
-	private int runClient(String workingDir, List<String> args, String irGenClient, String clientVersion, String irgenClientPluginVersion) throws IOException, ScannerException {
+	private int runClient(String workingDir, List<String> args, String irGenClient, String clientVersion, String irgenClientPluginVersion, String serverURL, String acceptInvalidCerts) throws IOException, ScannerException {
 		List<String> arguments = new ArrayList<String>();
-		arguments.add(getClientScript());
+		arguments.add(getClientScript(serverURL,acceptInvalidCerts));
 		arguments.addAll(args);
 		m_builder = new ProcessBuilder(arguments);
 		m_builder.directory(new File(workingDir));
@@ -104,8 +110,16 @@ public class SAClient implements SASTConstants {
 			m_builder.environment().put(IRGEN_CLIENT_PLUGIN_VERSION, irgenClientPluginVersion);
 			
 		m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(PREPARING_IRX, getLocalClientVersion())));
-		final Process proc = m_builder.start();
-		new Thread(new Runnable() {
+        if((serverURL !=null) && !serverURL.isEmpty()){
+            String options = System.getenv(CoreConstants.APPSCAN_OPTS) == null ? "" : System.getenv(CoreConstants.APPSCAN_OPTS);
+            if("true".equals(acceptInvalidCerts)) {
+                options += " -Dacceptssl";
+            }
+            m_builder.environment().put(CoreConstants.APPSCAN_OPTS, options);
+        }
+
+                final Process proc = m_builder.start();
+		    new Thread(new Runnable() {
 			@Override
 			public void run() {
 				BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
@@ -144,12 +158,21 @@ public class SAClient implements SASTConstants {
 	 * @throws IOException If an error occurs.
 	 * @throws ScannerException If an error occurs getting the client.
 	 */
-	public String getClientScript() throws IOException, ScannerException {
+        public String getClientScript() throws IOException, ScannerException {
+            return getClientScript("","");
+        }
+
+        public String getClientScript(String serverURL, String acceptInvalidCerts) throws IOException, ScannerException {
 		//See if we already have the client package.
 		String scriptPath = "bin" + File.separator + getScriptName(); //$NON-NLS-1$
+		String scriptPathMac= SACLIENT_SUBDIR_MAC + scriptPath;
 		File install = findClientInstall();
+
+		// Handle Mac bundle
+		if (SystemUtil.isMac() && new File(install, scriptPathMac).isFile() && !shouldUpdateClient(serverURL, Boolean.parseBoolean(acceptInvalidCerts)))
+			return new File(install, scriptPathMac).getAbsolutePath();
 		
-		if(install != null && new File(install, scriptPath).isFile() && !shouldUpdateClient())
+		if(install != null && new File(install, scriptPath).isFile() && !shouldUpdateClient(serverURL, Boolean.parseBoolean(acceptInvalidCerts)))
 			return new File(install, scriptPath).getAbsolutePath();
 		
 		//Download it.
@@ -162,7 +185,7 @@ public class SAClient implements SASTConstants {
 			clientZip.delete();
 		
 		try {
-			ServiceUtil.getSAClientUtil(clientZip, m_proxy);
+			ServiceUtil.getSAClientUtil(clientZip, m_proxy, serverURL, acceptInvalidCerts);
 		} catch(OutOfMemoryError e) {
 			throw new ScannerException(Messages.getMessage(DOWNLOAD_OUT_OF_MEMORY));
 		} catch(IOException e) {
@@ -176,6 +199,10 @@ public class SAClient implements SASTConstants {
 			m_progress.setStatus(new Message(Message.INFO, Messages.getMessage(DONE)));
 		}
 
+		// Handle Mac bundle
+		if (SystemUtil.isMac() && new File(install, scriptPathMac).isFile())
+			return new File(install, scriptPathMac).getAbsolutePath();
+		
 		return new File(findClientInstall(), scriptPath).getAbsolutePath();
 	}
 	
@@ -197,9 +224,17 @@ public class SAClient implements SASTConstants {
 			return false;
 		}
 	}
-	
+
 	public boolean shouldUpdateClient() throws IOException {
-		String serverVersion = ServiceUtil.getSAClientVersion(m_proxy);
+		return shouldUpdateClient("");
+	}
+
+	public boolean shouldUpdateClient(String serverURL) throws IOException {
+		return shouldUpdateClient(serverURL, false);
+	}
+	
+	public boolean shouldUpdateClient(String serverURL, boolean acceptInvalidCerts) throws IOException {
+		String serverVersion = ServiceUtil.getSAClientVersion(m_proxy,serverURL, acceptInvalidCerts);
 		String localVersion = getLocalClientVersion();
 
 		if(compareVersions(localVersion, serverVersion) && System.getProperty(CoreConstants.SKIP_UPDATE) == null) {
@@ -243,6 +278,11 @@ public class SAClient implements SASTConstants {
 	
 	private String getLocalClientVersion() {
 		File versionInfo = new File(findClientInstall(), VERSION_INFO);
+
+		// Handle Mac bundle
+		if (SystemUtil.isMac() && ! versionInfo.isFile()) {
+			versionInfo = new File(findClientInstall(), SACLIENT_SUBDIR_MAC + VERSION_INFO);
+		}
 		String version = null;
 		BufferedReader reader = null;
 		
@@ -285,7 +325,7 @@ public class SAClient implements SASTConstants {
 		
 		if(properties.containsKey(CoreConstants.SCAN_NAME)) {
 			args.add(OPT_NAME);
-			args.add(properties.get(CoreConstants.SCAN_NAME));
+			args.add(FileUtil.getValidFilename(properties.get(CoreConstants.SCAN_NAME)));
 		}
 		if(properties.containsKey(LOG_LOCATION)) {
 			args.add(OPT_LOG_LOCATION);
@@ -299,42 +339,57 @@ public class SAClient implements SASTConstants {
 			args.add(OPT_CONFIG);
 			args.add(properties.get(CONFIG_FILE));
 		}
-		if(properties.containsKey(DEBUG) || System.getProperty(DEBUG.toUpperCase()) != null)
+		if(properties.containsKey(DEBUG) || System.getProperty(DEBUG.toUpperCase()) != null) {
 			args.add(OPT_DEBUG);
-		if(properties.containsKey(VERBOSE))
+		}
+		if(properties.containsKey(VERBOSE)) {
 			args.add(OPT_VERBOSE);
-		if(properties.containsKey(THIRD_PARTY) || System.getProperty(THIRD_PARTY) != null)
+		}
+		if(properties.containsKey(THIRD_PARTY) || System.getProperty(THIRD_PARTY) != null) {
 			args.add(OPT_THIRD_PARTY);
-		if (properties.containsKey(OPEN_SOURCE_ONLY) || System.getProperty(OPEN_SOURCE_ONLY) != null)
+		}
+		if (properties.containsKey(OPEN_SOURCE_ONLY) || System.getProperty(OPEN_SOURCE_ONLY) != null || properties.getOrDefault(CoreConstants.SCANNER_TYPE, "").equals(CoreConstants.SOFTWARE_COMPOSITION_ANALYZER)) {
 			args.add(OPT_OPEN_SOURCE_ONLY);
-		
+		}
+		if (properties.containsKey(SOURCE_CODE_ONLY) || System.getProperty(SOURCE_CODE_ONLY) != null) {
+			args.add(OPT_SOURCE_CODE_ONLY);
+		}
+		if (!properties.containsKey(CoreConstants.INCLUDE_SCA) && !properties.containsKey(OPEN_SOURCE_ONLY) && properties.getOrDefault(CoreConstants.SCANNER_TYPE, "").equals(SAST)) {
+			args.add(OPT_STATIC_ANALYSIS_ONLY);
+		}
+		if(properties.containsKey(SCAN_SPEED)){
+			args.add(OPT_SCAN_SPEED);
+			if(properties.get(SCAN_SPEED).equals(NORMAL)){
+				args.add(THOROUGH);
+			} else if (properties.get(SCAN_SPEED).equals(FAST)) {
+				args.add(DEEP);
+			} else if (properties.get(SCAN_SPEED).equals(FASTER)) {
+				args.add(BALANCED);
+			} else if (properties.get(SCAN_SPEED).equals(FASTEST)) {
+				args.add(SIMPLE);
+			} else {
+				args.add(properties.get(SCAN_SPEED));
+			}
+		}
+		if(properties.containsKey(SECRETS_ENABLED) || System.getProperty(SECRETS_ENABLED) != null) {
+			args.add(OPT_SECRETS_ENABLED);
+		}
+		if(properties.containsKey(SECRETS_ONLY) || System.getProperty(SECRETS_ONLY) != null) {
+			args.add(OPT_SECRETS_ONLY);
+		}
+		//For AppScan 360 support.
+		if(Boolean.parseBoolean(properties.getOrDefault(CoreConstants.ACCEPT_INVALID_CERTS, Boolean.toString(false)))) {
+			args.add(OPT_ACCEPTS_SSL);
+		}
+		if(properties.get(CoreConstants.SERVER_URL) != null && properties.get(CoreConstants.SERVER_URL).trim() != "") { //$NON-NLS-1$
+			args.add("-D" + CoreConstants.BLUEMIX_SERVER + "=" + properties.get(CoreConstants.SERVER_URL)); //$NON-NLS-1$ //$NON-NLS-2$
+		}
+
 		return args;
 	}
 
-	private boolean compareVersions(String baseVersion, String newVersion) {
-		if(baseVersion == null)
-			return true;
-		
-		if(baseVersion != null && newVersion != null) {
-			String[] base = baseVersion.split("\\."); //$NON-NLS-1$
-			String[] next = newVersion.split("\\."); //$NON-NLS-1$
-
-			try {
-				for(int iter = 0; iter < base.length && iter < next.length; iter++) {
-					int lVersion = Integer.parseInt(base[iter]);
-					int sVersion = Integer.parseInt(next[iter]);
-					
-					if (((iter==0) && lVersion<sVersion)
-							|| (iter==1 && lVersion<sVersion)
-							|| (iter==2 && lVersion<sVersion)) {
-						return true;
-					}
-				}
-			} catch (NumberFormatException e) {
-				return false;
-			}
-		}
-		return false;
+	public boolean compareVersions(String baseVersion, String newVersion) {
+		return ServiceUtil.compareVersions(baseVersion, newVersion);
 	}
 	
 	private String getVersionFromString(String name) {

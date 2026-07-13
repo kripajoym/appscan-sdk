@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017, 2020.
+ * © Copyright HCL Technologies Ltd. 2017, 2025.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -14,6 +14,7 @@ import java.util.Map;
 
 import javax.net.ssl.HttpsURLConnection;
 
+import org.apache.wink.json4j.JSONArray;
 import org.apache.wink.json4j.JSONException;
 import org.apache.wink.json4j.JSONObject;
 
@@ -30,8 +31,6 @@ import com.hcl.appscan.sdk.utils.SystemUtil;
 public class CloudResultsProvider implements IResultsProvider, Serializable, CoreConstants {
 
 	private static final long serialVersionUID = 1L;
-
-	private static String DEFAULT_REPORT_FORMAT = "html"; //$NON-NLS-1$
 	
 	protected String m_type;
 	protected String m_scanId;
@@ -43,14 +42,21 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 	protected String m_message;
 
 	protected int m_totalFindings;
+        protected int m_criticalFindings;
 	protected int m_highFindings;
 	protected int m_mediumFindings;
 	protected int m_lowFindings;
 	protected int m_infoFindings;
+	protected String m_executionId;
 	
 	public CloudResultsProvider(String scanId, String type, IScanServiceProvider provider, IProgress progress) {
+		this(scanId, null, type, provider, progress);
+	}
+
+	public CloudResultsProvider(String scanId, String executionId, String type, IScanServiceProvider provider, IProgress progress) {
 		m_type = type;
 		m_scanId = scanId;
+		m_executionId = executionId;
 		m_hasResults = false;
 		m_scanProvider = provider;
 		m_progress = progress;
@@ -81,6 +87,12 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 		checkResults();
 		return m_totalFindings;
 	}
+
+        @Override
+        public int getCriticalCount() {
+                checkResults();
+                return m_criticalFindings;
+        }
 
 	@Override
 	public int getHighCount() {
@@ -153,11 +165,12 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 	
 	protected void loadResults() {
 		try {
-			JSONObject obj = m_scanProvider.getScanDetails(m_scanId);
-			obj = (JSONObject) obj.get(LATEST_EXECUTION);
+			JSONObject items = m_scanProvider.getScanDetails(m_scanId);
+			JSONObject obj = items.getJSONObject(LATEST_EXECUTION);
 			m_status = obj.getString(STATUS);
 			if(m_status != null && !(m_status.equalsIgnoreCase(INQUEUE) || m_status.equalsIgnoreCase(RUNNING))) {
 				m_totalFindings = obj.getInt(TOTAL_ISSUES);
+                                m_criticalFindings = obj.getInt(CRITICAL_ISSUES);
 				m_highFindings = obj.getInt(HIGH_ISSUES);
 				m_mediumFindings = obj.getInt(MEDIUM_ISSUES);
 				m_lowFindings = obj.getInt(LOW_ISSUES);
@@ -181,7 +194,7 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 		Map<String, String> request_headers = authProvider.getAuthorizationHeader(true);
 		request_headers.put(CONTENT_LENGTH, "0"); //$NON-NLS-1$
 	
-		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy());
+		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy(),m_scanProvider.getAuthenticationProvider().getacceptInvalidCerts());
 		HttpResponse response = client.get(request_url, request_headers, null);
 	
 		if (response.getResponseCode() == HttpsURLConnection.HTTP_OK) {
@@ -215,11 +228,12 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 			return FAILED;
 		}
 	
-		String request_url = authProvider.getServer() + String.format(API_REPORT_STATUS, reportId);
+		String request_url = authProvider.getServer() + API_REPORT_STATUS;
+		request_url += "?%24top=100&%24filter=Id%20eq%20"+reportId+"&%24count=false";
 		Map<String, String> request_headers = authProvider.getAuthorizationHeader(true);
 		request_headers.put(CONTENT_LENGTH, "0"); //$NON-NLS-1$
 	
-		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy());
+		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy(),m_scanProvider.getAuthenticationProvider().getacceptInvalidCerts());
 		HttpResponse response = client.get(request_url, request_headers, null);
     	
 		if (response.getResponseCode() != HttpsURLConnection.HTTP_OK) {
@@ -227,6 +241,56 @@ public class CloudResultsProvider implements IResultsProvider, Serializable, Cor
 		}
     	
     	JSONObject obj = (JSONObject) response.getResponseBodyAsJSON();
-    	return obj.getString(STATUS);
+        JSONArray array = obj.getJSONArray(ITEMS);
+        JSONObject json= (JSONObject) array.get(0);
+    	return json.getString(STATUS);
     }
+
+
+	public void getScanLogFile(File file , String scanId) {
+		if(file != null && !file.exists()) {
+			try {
+				getScanLog(scanId, file);
+			} catch (IOException | JSONException e) {
+				m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_SCANLOG)), e);
+			}
+		}
+	}
+
+	@Override
+	public void getScanLogFile(File file) {
+		getScanLogFile(file, m_scanId);
+	}
+
+	private void getScanLog(String scanId, File destination) throws IOException, JSONException {
+		IAuthenticationProvider authProvider = m_scanProvider.getAuthenticationProvider();
+		if(authProvider.isTokenExpired()) {
+			m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_LOGIN_EXPIRED)));
+			return;
+		}
+		String request_url = authProvider.getServer() + String.format(API_SCANS_SCANLOGS, scanId);
+		Map<String, String> request_headers = authProvider.getAuthorizationHeader(true);
+		request_headers.put(CONTENT_LENGTH, "0"); //$NON-NLS-1$
+
+		HttpClient client = new HttpClient(m_scanProvider.getAuthenticationProvider().getProxy(),m_scanProvider.getAuthenticationProvider().getacceptInvalidCerts());
+		HttpResponse response = client.get(request_url, request_headers, null);
+
+		if (response.isSuccess()) {
+			if (destination.isDirectory()) {
+				String fileName = "ScanLog" + "_" + SystemUtil.getTimeStamp() + "." + "zip"; //$NON-NLS-1$ //$NON-NLS-2$
+				destination = new File(destination, fileName);
+			}
+
+			destination.getParentFile().mkdirs();
+			response.getResponseBodyAsFile(destination);
+		} else {
+			JSONObject object = (JSONObject) response.getResponseBodyAsJSON();
+			if (object.has(MESSAGE)) {
+				m_progress.setStatus(new Message(Message.ERROR, object.getString(MESSAGE)));
+			}else{
+				m_progress.setStatus(new Message(Message.ERROR, Messages.getMessage(ERROR_GETTING_SCANLOG)));
+			}
+		}
+	}
+
 }

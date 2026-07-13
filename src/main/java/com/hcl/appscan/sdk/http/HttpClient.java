@@ -1,11 +1,12 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017. 
+ * © Copyright HCL Technologies Ltd. 2017, 2024.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
 package com.hcl.appscan.sdk.http;
-
+import org.apache.wink.json4j.JSONException;
+import org.apache.wink.json4j.JSONObject;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -13,9 +14,20 @@ import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 public class HttpClient {
 	
@@ -27,27 +39,37 @@ public class HttpClient {
     
     private IHttpProgress m_progressAdapter;
     private Proxy m_proxy;
+    private boolean m_bypassSSL;
 	
 	
 	public enum Method {
 		GET, POST, PUT, DELETE;
 	}
 	
-	public HttpClient(IHttpProgress progressAdapter, Proxy proxy) {
+	public HttpClient(IHttpProgress progressAdapter, Proxy proxy, boolean bypassSSL) {
 		m_progressAdapter = progressAdapter;
 		m_proxy = proxy;
+		m_bypassSSL = bypassSSL;
 	}
 	
 	public HttpClient() {
-		this(new DefaultHttpProgress(), Proxy.NO_PROXY);
+		this(new DefaultHttpProgress(), Proxy.NO_PROXY, false);
 	}
 	
 	public HttpClient(Proxy proxy) {
-		this(new DefaultHttpProgress(), proxy);
+		this(new DefaultHttpProgress(), proxy, false);
+	}
+	
+	public HttpClient(Proxy proxy, boolean bypassSSL) {
+		this(new DefaultHttpProgress(), proxy, bypassSSL);
 	}
 	
 	public HttpClient(IHttpProgress progressAdapter) {
-		this(progressAdapter, Proxy.NO_PROXY);
+		this(progressAdapter, Proxy.NO_PROXY, false);
+	}
+	
+	public HttpClient(IHttpProgress progressAdapter, boolean bypassSSL) {
+		this(progressAdapter, Proxy.NO_PROXY, bypassSSL);
 	}
 	
 	// ==============================
@@ -85,6 +107,41 @@ public class HttpClient {
 		return makeRequest(Method.POST, url, headerProperties, body);
 	}
 
+    /**
+     * Submit a post request.
+     *
+     * @param url The URL string.
+     * @param headerProperties An optional Map of header properties.
+     * @param parameters An optional Map of properties.
+     * @return The response as a byte array.
+     * @throws IOException If an error occurs.
+     */
+    public HttpResponse post(String url, Map<String, String> headerProperties, Map<String, String> parameters)
+            throws IOException, JSONException {
+        JSONObject params = new JSONObject(parameters);
+        JSONObject objectMap = new JSONObject();
+        for (Object key : params.keySet()) {
+            if (params.get(key) != null){
+                String value = params.get(key).toString();
+                if (value != null) {
+                    if (value.equalsIgnoreCase("true")) {
+                        objectMap.put(key.toString(), true);
+                    } else if (value.equalsIgnoreCase("false")) {
+                        objectMap.put(key.toString(), false);
+                    } else {
+                        // If the string is not "true" or "false," keep it as is
+                        objectMap.put(key.toString(), params.get(key));
+                    }
+                } else {
+                    // If the value is not a string, keep it as is
+                    objectMap.put(key.toString(), value);
+                }
+            }
+        }
+        String body = objectMap.toString();
+        return post(url, headerProperties, body);
+    }
+
 	/**
 	 * Submit a put request.
 	 * 
@@ -99,6 +156,35 @@ public class HttpClient {
 			throws IOException {
 		return makeRequest(Method.PUT, url, headerProperties, body);
 	}
+
+    /**
+     * Submit a put request.
+     *
+     * @param url The URL string.
+     * @param headerProperties An optional Map of header properties.
+     * @param parameters An optional Map of properties.
+     * @return The response as a byte array.
+     * @throws IOException If an error occurs.
+     */
+    public HttpResponse put(String url, Map<String, String> headerProperties, Map<String, String> parameters)
+            throws IOException, JSONException {
+        JSONObject objectMap = new JSONObject();
+        for (String key : parameters.keySet()) {
+            if (parameters.get(key) != null){
+                String value = parameters.get(key);
+                if (value.equalsIgnoreCase("true")) {
+                    objectMap.put(key, true);
+                } else if (value.equalsIgnoreCase("false")) {
+                    objectMap.put(key, false);
+                } else {
+                    // If the string is not "true" or "false," keep it as is
+                    objectMap.put(key, value);
+                }
+            }
+        }
+        String body = objectMap.toString();
+        return put(url, headerProperties, body);
+    }
 
 	/**
 	 * Submit a delete request.
@@ -277,6 +363,9 @@ public class HttpClient {
 		conn = (HttpURLConnection) requestURL.openConnection(m_proxy);
 		conn.setRequestMethod(method.name());
 		conn.setReadTimeout(0);
+		if((conn instanceof HttpsURLConnection) && m_bypassSSL) {
+			bypassSSL((HttpsURLConnection)conn);
+		}
 
 		// HTTP headers
 		if (headerProperties != null) {
@@ -322,5 +411,42 @@ public class HttpClient {
 	    }
 
 	    return result.toString();
+	}
+	
+	private void bypassSSL(HttpsURLConnection conn)  {
+		conn.setHostnameVerifier(new HostnameVerifier() {
+			@Override
+			public boolean verify(String hostname, SSLSession session) {
+				return true;
+			}
+		});
+
+		TrustManager[] trustManagers = new TrustManager[] { new X509TrustManager() {
+
+			private X509Certificate[] x509Certificates = new X509Certificate[0];
+
+			@Override
+			public X509Certificate[] getAcceptedIssuers() {
+				return x509Certificates;
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				// do nothing
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				// do nothing
+			}
+		}};
+
+		try {
+			SSLContext context = SSLContext.getInstance("TLSv1.2"); //$NON-NLS-1$
+			context.init(null, trustManagers, null);
+			conn.setSSLSocketFactory(context.getSocketFactory());
+		} catch (NoSuchAlgorithmException | KeyManagementException e) {
+			//Ignore. The connection should fail.
+		}
 	}
 }

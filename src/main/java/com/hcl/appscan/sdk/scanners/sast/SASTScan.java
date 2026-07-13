@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017. 
+ * © Copyright HCL Technologies Ltd. 2017, 2024.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.Proxy;
 import java.util.Map;
 
+import com.hcl.appscan.sdk.CoreConstants;
 import com.hcl.appscan.sdk.Messages;
 import com.hcl.appscan.sdk.error.InvalidTargetException;
 import com.hcl.appscan.sdk.error.ScannerException;
@@ -18,6 +19,8 @@ import com.hcl.appscan.sdk.logging.DefaultProgress;
 import com.hcl.appscan.sdk.logging.IProgress;
 import com.hcl.appscan.sdk.scan.IScanServiceProvider;
 import com.hcl.appscan.sdk.scanners.ASoCScan;
+import com.hcl.appscan.sdk.utils.ArchiveUtil;
+import com.hcl.appscan.sdk.utils.FileUtil;
 
 /**
  * A class for running static scans. For greater control over what gets scanned a {@link SASTScanManager} should be used.
@@ -44,17 +47,21 @@ public class SASTScan extends ASoCScan implements SASTConstants {
 		if(target == null || !(new File(target).exists()))
 			throw new InvalidTargetException(Messages.getMessage(TARGET_INVALID, target));
 
-		try {
-			generateIR();
-			analyzeIR();
-		} catch(IOException e) {
-			throw new ScannerException(Messages.getMessage(SCAN_FAILED, e.getLocalizedMessage()));
-		}
+        try {
+            if(getProperties().containsKey(CoreConstants.UPLOAD_DIRECT)){
+                generateZip();
+            } else {
+                generateIR();
+            }
+            analyzeIR();
+        } catch(IOException e) {
+            throw new ScannerException(Messages.getMessage(SCAN_FAILED, e.getLocalizedMessage()));
+        }
 	}
 
 	@Override
 	public String getType() {
-		return SAST;
+		return STATIC_ANALYZER;
 	}
 	
 	@Override
@@ -66,7 +73,7 @@ public class SASTScan extends ASoCScan implements SASTConstants {
 		return m_irx;
 	}
 	
-	private void generateIR() throws IOException, ScannerException {
+	protected void generateIR() throws IOException, ScannerException {
 		File targetFile = new File(getTarget());
 
 		//If we were given an irx file, don't generate a new one
@@ -82,12 +89,26 @@ public class SASTScan extends ASoCScan implements SASTConstants {
 		Proxy proxy = getServiceProvider() == null ? Proxy.NO_PROXY : getServiceProvider().getAuthenticationProvider().getProxy();		
 		new SAClient(getProgress(), proxy).run(targetDir, getProperties());
 		String irxDir = getProperties().containsKey(SAVE_LOCATION) ? getProperties().get(SAVE_LOCATION) : targetDir;
-		m_irx = new File(irxDir, getName() + IRX_EXTENSION);
+		m_irx = new File(irxDir, FileUtil.getValidFilename(getName()) + IRX_EXTENSION);
 		if(!m_irx.isFile())
 			throw new ScannerException(Messages.getMessage(ERROR_GENERATING_IRX, getScanLogs().getAbsolutePath()));
 	}
+
+    private void generateZip() throws IOException,ScannerException {
+        File targetFile = new File(getTarget());
+        if(targetFile.isFile()){
+            m_irx = targetFile;
+        } else if (targetFile.isDirectory()) {
+            String validatedZipName = FileUtil.getValidFilename(getName());
+            String zipLocation = System.getProperty("java.io.tmpdir")+File.separator+validatedZipName+ZIP_EXTENSION;
+            ArchiveUtil.zipFileOrFolder(targetFile, new File(zipLocation));
+            m_irx = new File(zipLocation);
+        }
+        if(!m_irx.isFile())
+            throw new ScannerException(Messages.getMessage(ERROR_GENERATING_ZIP, getScanLogs().getAbsolutePath()));
+    }
 	
-	private void analyzeIR() throws IOException, ScannerException {
+	protected void analyzeIR() throws IOException, ScannerException {
 		if(getProperties().containsKey(PREPARE_ONLY))
 			return;
 
@@ -96,12 +117,24 @@ public class SASTScan extends ASoCScan implements SASTConstants {
 			throw new ScannerException(Messages.getMessage(ERROR_FILE_UPLOAD, m_irx.getName()));		
 				
 		Map<String, String> params = getProperties();
-		params.put(ARSA_FILE_ID, fileId);
-		
-		setScanId(getServiceProvider().createAndExecuteScan(STATIC_ANALYZER, params));
-		if(getScanId() == null)
-			throw new ScannerException(Messages.getMessage(ERROR_SUBMITTING_IRX));
+                
+                if (getRescan()) {
+                    setScanId(params.get(CoreConstants.SCAN_ID));
+                    params.put(CoreConstants.FILE_ID, fileId);
+                    submitRescan();
+                    if(getExecutionId() == null)
+                        throw new ScannerException(Messages.getMessage(ERROR_CREATING_SCAN));
+                } else {
+                    params.put(FILE_ID, fileId);
+                    submitScan();
+                    if(!getProperties().containsKey(CoreConstants.INCLUDE_SCA) && getScanId() == null)
+                        throw new ScannerException(Messages.getMessage(ERROR_CREATING_SCAN));
+                }
 	}
+        
+    	protected void submitScan() {
+        	setScanId(getServiceProvider().createAndExecuteScan(STATIC_ANALYZER, getProperties()));
+    	}
 	
 	private File getScanLogs() {
 		if(m_irx == null) {

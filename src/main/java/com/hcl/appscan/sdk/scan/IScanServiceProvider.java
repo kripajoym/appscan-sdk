@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017,2018. 
+ * © Copyright HCL Technologies Ltd. 2017,2024.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -15,7 +15,6 @@ import org.apache.wink.json4j.JSONException;
 import org.apache.wink.json4j.JSONObject;
 
 import com.hcl.appscan.sdk.auth.IAuthenticationProvider;
-import com.hcl.appscan.sdk.http.HttpResponse;
 import com.hcl.appscan.sdk.logging.IProgress;
 
 /**
@@ -31,7 +30,16 @@ public interface IScanServiceProvider {
 	 * @return The id of the submitted scan, if successful.  Otherwise, null.
 	 */
 	public String createAndExecuteScan(String type, Map<String, String> params);
-	
+        
+        /**
+         * Initiates a Rescan
+         * 
+         * @param scanId The ID of the parent scan on which the rescan will be executed.
+         * @param params A Map of rescan parameters.
+         * @return The id of the submitted rescan, if successful. Otherwise, returns null.
+         */
+        public String rescan(String scanId, Map<String, String> params);
+  
 	/**
 	 * Submits a file for scanning.
 	 * 
@@ -60,7 +68,16 @@ public interface IScanServiceProvider {
 	 * @throws JSONException If an error occurs.
 	 */
 	public JSONArray getNonCompliantIssues(String scanId) throws IOException, JSONException;
-	
+
+	 /**
+	 * Gets the non compliant issues in JSON format.
+	 *
+	 * @param executionId The id of the scan execution to retrieve all the non compliant issues
+	 * @return JSONArray containing the issues as JSON objects.
+	 * @throws IOException If an error occurs.
+	 * @throws JSONException If an error occurs.
+	 */
+	public JSONArray getNonCompliantIssuesUsingExecutionId(String executionId) throws IOException, JSONException;
 	/**
 	 * Gets the {@link IAuthenticationProvider} used to authenticate with a scanning service.
 	 * 
@@ -74,4 +91,12 @@ public interface IScanServiceProvider {
 	 * @param progress The {@link IProgress}.
 	 */
 	public void setProgress(IProgress progress);
+
+	/**
+	 * Fetch the details of all the executions of a scan.
+	 *
+	 * @param scanId The scanId to test
+	 * @return JSONArray.
+	 */
+	public JSONArray getBaseScanDetails(String scanId);
 }

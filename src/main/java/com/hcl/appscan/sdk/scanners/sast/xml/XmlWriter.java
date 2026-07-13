@@ -52,7 +52,7 @@ implements	IModelXMLConstants
 
 	@Override
 	public void visit(List<ISASTTarget> targets, boolean isThirdPartyScanningEnabled,
-	                  boolean isOpenSourceOnlyEnabled, boolean isSourceCodeOnlyEnabled, boolean isStaticAnalysisOnlyEnabled) {
+	                  boolean isOpenSourceOnlyEnabled, boolean isSourceCodeOnlyEnabled, boolean isStaticAnalysisOnlyEnabled, boolean isSecretsScanningDisabled, boolean isSecretsScanningEnabled, boolean isSecretsScanningOnlyEnabled) {
 		m_config.beginElement(E_CONFIGURATION);
 
 		if (isThirdPartyScanningEnabled) {
@@ -69,6 +69,16 @@ implements	IModelXMLConstants
 		
 		if (isStaticAnalysisOnlyEnabled) {
 			m_config.setAttribute(A_STATIC_ANALYSIS_ONLY, "true");
+		}
+		
+		if (isSecretsScanningDisabled) {
+			m_config.setAttribute(A_SECRETS_DISABLED, "true");
+		}
+		if (isSecretsScanningEnabled) {
+			m_config.setAttribute(A_SECRETS_ENABLED, "true");
+		}
+		if (isSecretsScanningOnlyEnabled) {
+			m_config.setAttribute(A_SECRETS_ONLY, "true");
 		}
 
 		m_config.beginElement(E_TARGETS);
@@ -113,6 +123,7 @@ implements	IModelXMLConstants
 		m_transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no"); //$NON-NLS-1$
 		m_config.write(m_transformer);
 	}
+
 
 	/**
 	 * Returns the location of the generated configuration file.

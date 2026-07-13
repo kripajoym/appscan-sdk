@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017. 
+ * © Copyright HCL Technologies Ltd. 2017, 2024. 
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -14,6 +14,7 @@ import com.hcl.appscan.sdk.logging.DefaultProgress;
 import com.hcl.appscan.sdk.logging.IProgress;
 import com.hcl.appscan.sdk.results.CloudResultsProvider;
 import com.hcl.appscan.sdk.results.IResultsProvider;
+import com.hcl.appscan.sdk.results.NonCompliantIssuesResultProvider;
 import com.hcl.appscan.sdk.scan.IScan;
 import com.hcl.appscan.sdk.scan.IScanServiceProvider;
 import com.hcl.appscan.sdk.utils.SystemUtil;
@@ -24,6 +25,8 @@ public abstract class ASoCScan implements IScan, ScanConstants, Serializable {
 	
 	private String m_target;
 	private String m_scanId;
+        private String m_executionId;
+        private boolean m_rescan;
 	private IProgress m_progress;
 	private IScanServiceProvider m_serviceProvider;
 	private Map<String, String> m_properties;
@@ -39,11 +42,16 @@ public abstract class ASoCScan implements IScan, ScanConstants, Serializable {
 			m_properties.put(CoreConstants.SCAN_NAME, getType() + SystemUtil.getTimeStamp());
 		m_progress = progress;
 		m_serviceProvider = provider;
+        m_rescan = m_properties.containsKey(CoreConstants.SCAN_ID);
 	}
 
 	@Override
 	public String getScanId() {
 		return m_scanId;
+	}
+        
+        public String getExecutionId() {
+		return m_executionId;
 	}
 
 	@Override
@@ -57,11 +65,34 @@ public abstract class ASoCScan implements IScan, ScanConstants, Serializable {
 		provider.setReportFormat(getReportFormat());
 		return provider;
 	}
-        
 
+	@Override
+	public IResultsProvider getResultsProvider(boolean nonCompliantIssues) {
+		if(nonCompliantIssues) {
+			IResultsProvider provider = new NonCompliantIssuesResultProvider(m_scanId, m_executionId, getType(), m_serviceProvider, m_progress);
+			provider.setReportFormat(getReportFormat());
+			return provider;
+		}
+		else {
+			return getResultsProvider();
+		}
+	}
+	
 	protected void setScanId(String id) {
 		m_scanId = id;
 	}
+        
+        protected void setExecutionId(String id){
+		m_executionId = id;
+	}
+        
+        public void setRescan(boolean rescan){
+                m_rescan = rescan;
+	}
+
+    public boolean getRescan() {
+        return m_rescan;
+    }
 	
 	protected String getAppId() {
 		return m_properties.get(CoreConstants.APP_ID);
@@ -69,6 +100,10 @@ public abstract class ASoCScan implements IScan, ScanConstants, Serializable {
 	
 	protected String getTarget() {
 		return m_target;
+	}
+	
+	public void setTarget(String target) {
+		m_target = target;
 	}
 	
 	public IProgress getProgress() {
@@ -88,5 +123,9 @@ public abstract class ASoCScan implements IScan, ScanConstants, Serializable {
 		return m_properties;
 	}
 	
+        protected void submitRescan() {
+        	    setExecutionId(getServiceProvider().rescan(getScanId(),getProperties()));
+    	}
+         
 	public abstract String getReportFormat();
 }

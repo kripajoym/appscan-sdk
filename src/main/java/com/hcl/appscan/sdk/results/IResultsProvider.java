@@ -1,6 +1,6 @@
 /**
  * © Copyright IBM Corporation 2016.
- * © Copyright HCL Technologies Ltd. 2017, 2020.
+ * © Copyright HCL Technologies Ltd. 2017, 2025.
  * LICENSE: Apache License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0
  */
 
@@ -16,6 +16,8 @@ import com.hcl.appscan.sdk.logging.IProgress;
  */
 public interface IResultsProvider {
 
+	public static String DEFAULT_REPORT_FORMAT = "html"; //$NON-NLS-1$
+	
 	/**
 	 * Answers whether or not this provider contains any results.
 	 * @return True if the provider has results.
@@ -40,6 +42,12 @@ public interface IResultsProvider {
 	 */
 	public int getFindingsCount();
 
+        /**
+         * The number of critical findings in the result.
+         * @return The total number of critical findings.
+        */
+        public int getCriticalCount();
+	
 	/**
 	 * The number of high findings in the result.
 	 * @return The total number of high findings.
@@ -101,4 +109,10 @@ public interface IResultsProvider {
 	 * @param progress The IProgress.
 	 */
 	public void setProgress(IProgress progress);
+
+	/**
+	 * Gets the results in a file.
+	 * @param destination The File to store the scan logs.
+	 */
+	public void getScanLogFile(File destination);
 }

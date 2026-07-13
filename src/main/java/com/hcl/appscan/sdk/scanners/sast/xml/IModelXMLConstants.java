@@ -24,6 +24,9 @@ public interface IModelXMLConstants {
 	String A_OPEN_SOURCE_ONLY       = "openSourceOnly";         //$NON-NLS-1$
 	String A_SOURCE_CODE_ONLY		= "sourceCodeOnly";         //$NON-NLS-1$
 	String A_STATIC_ANALYSIS_ONLY	= "staticAnalysisOnly";     //$NON-NLS-1$
+	String A_SECRETS_ENABLED        = "enableSecrets";			//$NON-NLS-1$
+	String A_SECRETS_DISABLED       = "noSecrets";				//$NON-NLS-1$
+	String A_SECRETS_ONLY           = "secretsOnly";			//$NON-NLS-1$
 
 	//Java
 	String A_PATH					= "path";					//$NON-NLS-1$
@@ -32,6 +35,7 @@ public interface IModelXMLConstants {
 	String A_JDK_PATH				= "jdk_path";				//$NON-NLS-1$
 	String A_JSP_COMPILER			= "jsp_compiler";			//$NON-NLS-1$
 	String A_ADDITIONAL_CLASSPATH	= "additional_classpath";	//$NON-NLS-1$
+	String A_IRX_MINOR_CACHE_HOME	= "irx_minor_cache_home";	//$NON-NLS-1$
 	String A_OUTPUTS_ONLY			= "outputs-only";			//$NON-NLS-1$
 	
 	//C++
