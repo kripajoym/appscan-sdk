@@ -26,5 +26,5 @@ steps:
     scantype: 'static'
     scanMethod: 'IRX'
     ScanSpeedOptions: 'thorough'
-    email: true
+    emailNotification: true
     personalScan: true
